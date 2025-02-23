@@ -4,7 +4,7 @@ import time
 from collections import deque
 
 class MatchingConsumer:
-    def __init__(self, frame_queue_limit=20, gaze_queue_limit=200, tolerance=0.005): #TODO tolerance check not enough need was behind
+    def __init__(self, frame_queue_limit=20, gaze_queue_limit=200, tolerance=0.005): #TODO tolerance check not enough
         self.frame_queue = deque()
         self.gaze_queue = deque()
         self.current_frame = None
@@ -98,21 +98,28 @@ if __name__ == "__main__":
         from adbutils import adb
         import cv2
         from devices import Neon, Headset
-        
+        import argparse
+        import sys
+
         side = 0
         scale = 0.5
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('-i', '--ip', help='Neon IP', type=str)
+        parser.add_argument('-p', '--port', help='Neon port', type=int, default=8080)
+        args = parser.parse_args()
+
         headset = Headset(scale)
-        neon = Neon("192.168.1.27", 8080)
-        
         matcher = MatchingConsumer()
+        client_gaze = NeonClient(args.ip, args.port)
+        neon = Neon(client_gaze.ip, client_gaze.port)
+        client_frame = ScrcpyClient(device=adb.device_list()[0], max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
-        client_gaze = NeonClient(neon.ip, neon.port)
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
             return
         client_gaze.add_listener(const.PlEvents.GAZE_DATA, on_gaze_data)
-        
-        client_frame = ScrcpyClient(device=adb.device_list()[0], max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
+
         def on_frame(frame, pts):
             matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
             return

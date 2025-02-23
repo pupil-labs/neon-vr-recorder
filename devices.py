@@ -54,19 +54,20 @@ class Headset:
         return (projected_point / projected_point[2]).astype(int)[:2]
         
 class Neon:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, config_path="data/neon.json"):
         self.ip = ip
         self.port = port
+
         calib_path = f"data/{self.get_module_serial()}.bin"
         if os.path.exists(calib_path) is False:
             self.download_intrinsics(calib_path)
         self.intrinsics = self.read_intrinsics(calib_path)
-        
-        euler_angles = np.array([
-            -4,
-            1,
-            1.5
-        ])
+
+        self.config = None
+        with open(config_path, 'r') as config_file:
+            self.config = json.load(config_file)
+
+        euler_angles = np.array(self.config["rotation"])
         self.rotation = euler_to_rot(euler_angles)
         return
         
