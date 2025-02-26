@@ -1,6 +1,3 @@
-from streaming import NeonClient, ScrcpyClient
-import const
-import time
 from collections import deque
 
 class MatchingConsumer:
@@ -94,9 +91,18 @@ class MatchingConsumer:
         return out_frame, out_gaze
 
 if __name__ == "__main__":
-    def test_matcher():
-        from adbutils import adb
-        import cv2
+    import cv2
+    import numpy as np
+    # Workaround for https://github.com/opencv/opencv/issues/21952
+    cv2.imshow("cv/av bug", np.zeros(1))
+    cv2.destroyAllWindows()
+
+    from streaming import NeonClient, ScrcpyClient
+    import const
+    import time
+    from adbutils import adb
+
+    def main():
         from devices import Neon, Headset
         import argparse
         import sys
@@ -162,8 +168,6 @@ if __name__ == "__main__":
         return
         
     def test_scrcpy():
-        from adbutils import adb
-        import cv2
         import av
         import fractions
         adb.connect("127.0.0.1:5555")
@@ -193,4 +197,4 @@ if __name__ == "__main__":
         client.stop()
         return
     
-    test_matcher()
+    main()
