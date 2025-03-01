@@ -113,13 +113,16 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument('-i', '--ip', help='Neon IP', type=str)
         parser.add_argument('-p', '--port', help='Neon port', type=int, default=8080)
+        parser.add_argument('-d', '--di', help='Adb device index', type=int, default=0)
         args = parser.parse_args()
 
         headset = Headset(scale)
         matcher = MatchingConsumer()
         client_gaze = NeonClient(args.ip, args.port)
         neon = Neon(client_gaze.ip, client_gaze.port)
-        client_frame = ScrcpyClient(device=adb.device_list()[0], max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
+        device = adb.device_list()[args.di]
+        adb.connect(f"{device.wlan_ip()}:5555")
+        client_frame = ScrcpyClient(device=device, max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
@@ -170,8 +173,9 @@ if __name__ == "__main__":
     def test_scrcpy():
         import av
         import fractions
-        adb.connect("127.0.0.1:5555")
-        client = ScrcpyClient(device=adb.device_list()[0], max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
+        device = adb.device_list()[0]
+        adb.connect(f"{device.wlan_ip()}:5555")
+        client = ScrcpyClient(device=device, max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
         def on_frame(frame, pts):
             cv2.imshow("frame", frame)
