@@ -13,10 +13,12 @@ python record.py
 ```
 
 ### Using wireless mode
-Note: The VR headset must be powered on initially, connected to the PC via a USB cable, with Developer Mode enabled and USB Debugging authorized.
+Note: The VR headset must be powered on initially, connected to the PC via a USB cable, with Developer Mode enabled and USB Debugging authorized. Don't forget to replace _ip-address-of-device_ with the actual IP address, which can be copied from the output of the second command. 
 
 ```sh
 adb tcpip 5555
+adb shell ip addr show wlan0
+adb connect ip-address-of-device:5555
 ```
 
 Note: You can now disconnect the VR headset from the PC. Ensure the VR headset is awake before starting the application.
