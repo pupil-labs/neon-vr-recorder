@@ -11,3 +11,16 @@ Note: Ensure that the VR headset is powered on, connected to the PC via USB cabl
 ```sh
 python record.py
 ```
+
+### Using wireless mode
+Note: The VR headset must be powered on initially, connected to the PC via a USB cable, with Developer Mode enabled and USB Debugging authorized.
+
+```sh
+adb tcpip 5555
+```
+
+Note: You can now disconnect the VR headset from the PC. Ensure the VR headset is awake before starting the application.
+
+```sh
+python record.py
+```
