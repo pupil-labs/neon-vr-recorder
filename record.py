@@ -121,7 +121,6 @@ if __name__ == "__main__":
         client_gaze = NeonClient(args.ip, args.port)
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
-        adb.connect(f"{device.wlan_ip()}:5555")
         client_frame = ScrcpyClient(device=device, max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
         def on_gaze_data(data):
@@ -174,7 +173,6 @@ if __name__ == "__main__":
         import av
         import fractions
         device = adb.device_list()[0]
-        adb.connect(f"{device.wlan_ip()}:5555")
         client = ScrcpyClient(device=device, max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
         def on_frame(frame, pts):

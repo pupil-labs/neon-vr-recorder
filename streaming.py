@@ -297,7 +297,6 @@ if __name__ == "__main__":
         import cv2
         import av
         import fractions
-        adb.connect("127.0.0.1:5555")
         client = ScrcpyClient(device=adb.device_list()[0], max_width=1032,bitrate=1600000, max_fps=20, send_frame_meta=True, crop="2064:2208:0:0")
         
         def on_frame(frame, pts):
