@@ -18,23 +18,23 @@ class Headset:
         with open(calib_path, 'r') as calib_file:
             self.calib = json.load(calib_file)
         
-        full_resolution = self.calib["resolution"]
-        res = np.array((full_resolution[0]*scale, full_resolution[1]*scale)).astype(int)
+        calib_resolution = self.calib["resolution"]
+        res = np.array((calib_resolution[0]*scale, calib_resolution[1]*scale)).astype(int)
         img_size = (res[0]//2, res[1])
-        scaling_mat = [
-            [scale, 1, scale],
-            [1, scale, scale],
-            [1, 1, 1]
-        ]
+        scaling_mat = np.array([
+            [scale, 1, scale, scale],
+            [1, scale, scale, scale],
+            [1, 1, 1, scale]
+        ])
         
         self.P = (
-            np.array(self.calib["P1"]),
-            np.array(self.calib["P2"])
+            np.multiply(self.calib["P1"], scaling_mat),
+            np.multiply(self.calib["P2"], scaling_mat)
         )
         
         self.maps = tuple(
             cv2.initUndistortRectifyMap(
-                np.multiply(self.calib[f"{side}CameraMatrix"], scaling_mat),
+                np.multiply(self.calib[f"{side}CameraMatrix"], scaling_mat[:3,:3]),
                 np.array(self.calib[f"{side}DistCoeffs"]),
                 np.array(self.calib[f"R{i+1}"]),
                 self.P[i],

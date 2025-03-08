@@ -1,7 +1,12 @@
 {
     "rotation":[
-        -4,
-        1,
+        -1.5,
+        1.5,
         1.5
-    ]
+    ],
+    "comments":{
+        "x+":"move down",
+        "y+":"move right",
+        "z+":"tilt counterclockwise"
+    }
 }
