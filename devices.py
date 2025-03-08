@@ -18,9 +18,10 @@ class Headset:
         with open(calib_path, 'r') as calib_file:
             self.calib = json.load(calib_file)
         
-        calib_resolution = self.calib["resolution"]
-        res = np.array((calib_resolution[0]*scale, calib_resolution[1]*scale)).astype(int)
-        img_size = (res[0]//2, res[1])
+        res = self.calib["resolution"]
+        self.img_size = (res[0] // 2, res[1])
+        cres = self.calib["calibResolution"]
+        self.target_img_size = (int(cres[0] * scale * 0.5), int(cres[1] * scale))
         scaling_mat = np.array([
             [scale, 1, scale, scale],
             [1, scale, scale, scale],
@@ -38,7 +39,7 @@ class Headset:
                 np.array(self.calib[f"{side}DistCoeffs"]),
                 np.array(self.calib[f"R{i+1}"]),
                 self.P[i],
-                img_size,
+                self.target_img_size,
                 cv2.CV_16SC2
             ) for i, side in enumerate(("left", "right"))
         )

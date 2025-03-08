@@ -143,8 +143,12 @@
             0.0
         ]
     ],
-    "resolution": [
+    "calibResolution": [
         2064,
         1104
+    ],
+    "resolution": [
+        4128,
+        2208
     ]
 }
