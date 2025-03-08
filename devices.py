@@ -19,7 +19,7 @@ class Headset:
             self.calib = json.load(calib_file)
         
         full_resolution = self.calib["resolution"]
-        res = np.array((full_resolution[0]*scale, full_resolution[0]*scale)).astype(int) 
+        res = np.array((full_resolution[0]*scale, full_resolution[1]*scale)).astype(int)
         img_size = (res[0]//2, res[1])
         scaling_mat = [
             [scale, 1, scale],
