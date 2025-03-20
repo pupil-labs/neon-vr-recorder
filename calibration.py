@@ -12,6 +12,7 @@ class Calibrator:
         self.pattern_size = (10, 7)
         self.criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 1e-3)
         self.cal_res = {}
+        self.square_size = 0.1
         return
 
     def process_frame(self, skip=True):
@@ -47,7 +48,7 @@ class Calibrator:
             return
         pattern_points = np.zeros((np.prod(self.pattern_size), 3), np.float32)
         pattern_points[:, :2] = np.indices(self.pattern_size).T.reshape(-1, 2)
-        pattern_points = [pattern_points * 0.1] * len(self.left_pts)
+        pattern_points = [pattern_points * self.square_size] * len(self.left_pts)
 
         err, lcm, ldc, rcm, rdc, rm, t, _, _ = cv2.stereoCalibrate(pattern_points, self.left_pts, self.right_pts, None, None, None, None, self.img_size, flags=cv2.CALIB_FIX_TANGENT_DIST)
         R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(lcm, ldc, rcm, rdc, self.img_size, rm, t)
