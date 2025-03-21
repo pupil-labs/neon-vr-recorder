@@ -121,8 +121,7 @@ if __name__ == "__main__":
         client_gaze = NeonClient(args.ip, args.port)
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
-        region = f"{headset.img_size[0]}:{headset.img_size[1]}:0:0"
-        client_frame = ScrcpyClient(device=device, max_width=headset.target_img_size[0], bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
+        client_frame = ScrcpyClient(device=device, max_width=headset.target_img_size[0] << 1, bitrate=1600000, max_fps=20, send_frame_meta=True)
         
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
@@ -130,6 +129,7 @@ if __name__ == "__main__":
         client_gaze.add_listener(const.PlEvents.GAZE_DATA, on_gaze_data)
 
         def on_frame(frame, pts):
+            frame = np.hsplit(frame, 2)[0]
             matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
             return
         client_frame.add_listener(const.ScrcpyEvents.FRAME, on_frame)
