@@ -10,7 +10,7 @@ class ScrcpyEvents(Enum):
     PACKET = "packet"
 
 class ScrcpyControls(IntEnum):
-    GET_CURRENT_TIME = 16
+    GET_CURRENT_TIME = 18
 
 class ScrcpyMasks(IntEnum):
     PACKET_PTS_MASK = (1 << 62) - 1
