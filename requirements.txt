@@ -1,4 +1,4 @@
 pupil_labs_realtime_api==1.3.5
 opencv-python==4.10.0.84
 adbutils==2.8.0
-pyav==13.1.0
+av==13.1.0
