@@ -121,7 +121,7 @@ if __name__ == "__main__":
         client_gaze = NeonClient(args.ip, args.port)
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
-        region = f"{headset.img_size[0]}:{headset.img_size[1]}:0:0"
+        region = f"{headset.img_size[0]}:{headset.img_size[1]}:{headset.img_size[0] * side}:0"
         client_frame = ScrcpyClient(device=device, max_width=headset.target_img_size[0], bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
         
         def on_gaze_data(data):
