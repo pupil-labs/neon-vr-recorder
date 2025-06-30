@@ -178,7 +178,7 @@ class ScrcpyClient(StreamClient):
             "app_process",
             "/",
             "com.genymobile.scrcpy.Server",
-            "3.2", #Scrcpy server version
+            "3.3.1", #Scrcpy server version
             "log_level=info",
             f"max_size={self.max_width}",
             f"max_fps={self.max_fps}",
