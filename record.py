@@ -114,6 +114,7 @@ if __name__ == "__main__":
         parser.add_argument('-i', '--ip', help='Neon IP', type=str)
         parser.add_argument('-p', '--port', help='Neon port', type=int, default=8080)
         parser.add_argument('-d', '--di', help='Adb device index', type=int, default=0)
+        parser.add_argument('-s', '--split-fix', help='Replace scrcpy cropping with NumPy horizontal split', action='store_true')
         args = parser.parse_args()
 
         headset = Headset(scale)
@@ -122,7 +123,11 @@ if __name__ == "__main__":
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
         region = f"{headset.img_size[0]}:{headset.img_size[1]}:{headset.img_size[0] * side}:0"
-        client_frame = ScrcpyClient(device=device, max_width=headset.target_img_size[0], bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
+        max_width=headset.target_img_size[0]
+        if args.split_fix is True:
+            region = None
+            max_width = max_width << 1
+        client_frame = ScrcpyClient(device=device, max_width=max_width, bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
         
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
@@ -130,6 +135,8 @@ if __name__ == "__main__":
         client_gaze.add_listener(const.PlEvents.GAZE_DATA, on_gaze_data)
 
         def on_frame(frame, pts):
+            if args.split_fix is True:
+                frame = np.hsplit(frame, 2)[side]
             matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
             return
         client_frame.add_listener(const.ScrcpyEvents.FRAME, on_frame)
