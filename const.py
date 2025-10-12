@@ -14,3 +14,4 @@ class ScrcpyControls(IntEnum):
 
 class ScrcpyMasks(IntEnum):
     PACKET_PTS_MASK = (1 << 62) - 1
+    PACKET_FLAG_CONFIG = 1 << 63

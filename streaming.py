@@ -13,6 +13,18 @@ from control import ControlSender
 from adbutils import AdbConnection, AdbError, AdbDevice, Network
 from av.codec import CodecContext
 
+def recv_exact(sock, n):
+    buf = bytearray(n)
+    view = memoryview(buf)
+    received = 0
+    while received < n:
+        chunk = sock.recv_into(view[received:], n - received)
+        if chunk == 0:
+            # Peer closed or no more data
+            raise ConnectionError(f"Socket closed while receiving (got {received} of {n} bytes)")
+        received += chunk
+    return bytes(buf)
+
 class StreamClient(abc.ABC):
 
     def __init__(self, events):
@@ -226,12 +238,12 @@ class ScrcpyClient(StreamClient):
         print("OFFSET", self.offset)
         
         codec = CodecContext.create("h264", "r")
-        keyframe_recorded = False
         pts_ts = 0
         
         while self.alive:
             try:
                 pts = 0
+                data_packet_length = 65535
                 if self.send_frame_meta:
                     video_header = self._video_socket.recv(12)
                     if len(video_header) != 12:
@@ -240,12 +252,11 @@ class ScrcpyClient(StreamClient):
                     (pts, data_packet_length) = struct.unpack(">QL", video_header)
                     pts = pts & const.ScrcpyMasks.PACKET_PTS_MASK
                     #print(pts)
-                raw_h264 = self._video_socket.recv(65535)
-                t = raw_h264[4] & 0x1F
-                if t == 5:#keyframe nal
-                    keyframe_recorded = True
-                elif t != 7 and keyframe_recorded is False:
-                    continue
+                raw_h264 = recv_exact(self._video_socket, data_packet_length)
+
+                if len(raw_h264) != data_packet_length:
+                    print(len(raw_h264), data_packet_length)
+
                 packets = codec.parse(raw_h264)
                 for packet in packets:
                     self._send_to_listeners(const.ScrcpyEvents.PACKET, packet, codec, pts_ts)
