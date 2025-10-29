@@ -9,6 +9,7 @@ class MatchingConsumer:
         self.frame_queue_limit = frame_queue_limit
         self.gaze_queue_limit = gaze_queue_limit
         self.tolerance = tolerance
+        self.curr_pts_frame = 0
         return
         
     def try_consume(self, queue):
@@ -26,6 +27,9 @@ class MatchingConsumer:
 
         if self.current_frame is not None:
             #4 possible states, frame should wait, gaze should wait, match was found or no data
+            self.curr_pts_frame = self.current_frame[2]
+
+            # 4 possible states, frame should wait, gaze should wait, match was found or no data
             frame_wait = False
             gaze_wait = False
             match_found = False
@@ -101,6 +105,9 @@ if __name__ == "__main__":
     import const
     import time
     from adbutils import adb
+    import av
+    import fractions
+    from pathlib import Path
 
     def main():
         from devices import Neon, Headset
@@ -111,11 +118,60 @@ if __name__ == "__main__":
         scale = 1
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('-i', '--ip', help='Neon IP', type=str)
-        parser.add_argument('-p', '--port', help='Neon port', type=int, default=8080)
-        parser.add_argument('-d', '--di', help='Adb device index', type=int, default=0)
-        parser.add_argument('-s', '--split-fix', help='Replace scrcpy cropping with NumPy horizontal split', action='store_true')
+        parser.add_argument("-i", "--ip", help="Neon IP", type=str)
+        parser.add_argument("-p", "--port", help="Neon port", type=int, default=8080)
+        parser.add_argument("-d", "--di", help="Adb device index", type=int, default=0)
+        parser.add_argument(
+            "-s",
+            "--split-fix",
+            help="Replace scrcpy cropping with NumPy horizontal split",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--save",
+            help="Record video to a file",
+            type=Path,
+            default=None,
+            dest="record_video",
+        )
+        parser.add_argument(
+            "--save-vr-gaze",
+            help="Record gaze data to a file in screen record coord",
+            type=Path,
+            default=None,
+            dest="record_gaze",
+        )
+        parser.add_argument(
+            "-nr",
+            "--neon-recording",
+            help="Start a Neon recording",
+            action="store_true",
+        )
         args = parser.parse_args()
+
+        gaze_saver_thread = None
+        gaze_queue_saver = None
+        if args.record_gaze:
+            import queue
+            import threading
+
+            def gaze_saver(q, output_path):
+                import numpy as np
+
+                gaze_data = []
+                while True:
+                    data = q.get()
+                    if data is None:  # Sentinel to stop
+                        break
+                    gaze_data.append(data)
+                if gaze_data:
+                    np.save(output_path, np.array(gaze_data, dtype=object))
+
+            gaze_queue_saver = queue.Queue()
+            gaze_saver_thread = threading.Thread(
+                target=gaze_saver, args=(gaze_queue_saver, args.record_gaze)
+            )
+            gaze_saver_thread.start()
 
         headset = Headset(scale)
         matcher = MatchingConsumer()
@@ -129,37 +185,112 @@ if __name__ == "__main__":
             max_width = max_width << 1
         client_frame = ScrcpyClient(device=device, max_width=max_width, bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
         
+
+        container = None
+        if args.record_video:
+            container = av.open(args.record_video, mode="w")
+            stream = container.add_stream("h264")
+
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
             return
         client_gaze.add_listener(const.PlEvents.GAZE_DATA, on_gaze_data)
 
         def on_frame(frame, pts):
+        def on_frame(frame, pts, pts_ts):
             if args.split_fix is True:
                 frame = np.hsplit(frame, 2)[side]
-            matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
+            matcher.frame_queue.append(
+                (pts + client_frame.offset * 0.001, frame, pts_ts)
+            )
             return
+
         client_frame.add_listener(const.ScrcpyEvents.FRAME, on_frame)
         
         client_gaze.start()
         client_frame.start()
-        
+
+        time_file = None
+        if args.record_gaze:
+            time.sleep(3)
+            time_file = open(args.record_gaze.with_suffix(".time"), "w")
+            client_gaze.device.recording_start()
+
+        is_first_gaze = True
+
         try:
             while(True):
                 frame, gaze = matcher.next_match()
                 if frame is not None:
                     undistorted = headset.unwrap(frame[1], side)
                     if gaze is not None:
+                        if is_first_gaze and args.record_gaze:
+                            is_first_gaze = False
+                            estimate = client_gaze.device.estimate_time_offset()
+                            clock_offset_ns = round(
+                                estimate.time_offset_ms.mean * 1_000_000
+                            )
+
+                            current_time_ns_in_client_clock = time.time_ns()
+                            current_time_ns_in_companion_clock = (
+                                current_time_ns_in_client_clock - clock_offset_ns
+                            )
+                            print(
+                                client_gaze.device.send_event(
+                                    "neon_vr_recorder.begin",
+                                    event_timestamp_unix_ns=current_time_ns_in_companion_clock,
+                                )
+                            )
+
                         gaze_dir = neon.get_gaze_dir(gaze[1])
                         point = headset.wrap(gaze_dir, side)
+                        if gaze_queue_saver is not None:
+                            gaze_queue_saver.put(
+                                (gaze[1].timestamp_unix_seconds, point)
+                            )
                         cv2.circle(undistorted, point, 10, (0, 0, 255), 2)
+
+                        if container and frame:
+                            undistorted = cv2.cvtColor(undistorted, cv2.COLOR_BGR2RGB)
+                            frame = av.VideoFrame.from_ndarray(
+                                undistorted, format="rgb24"
+                            )
+
+                            for packet in stream.encode(frame):
+                                packet.time_base = fractions.Fraction(1, 20)
+                                packet.pts = matcher.curr_pts_frame
+
+                                if not stream.width:
+                                    stream.width = codec.width
+                                    stream.height = codec.height
+                                    stream.pix_fmt = "yuv420p"
+
+                                container.mux(packet)
+
+                                if time_file:
+                                    ts = gaze[0] if gaze else adjusted_ts
+                                    time_file.write(f"{ts}\n")
+
                     cv2.imshow("frame", undistorted)
                 cv2.waitKey(10)
         except KeyboardInterrupt:
             pass
-        
-        client_gaze.stop()
-        client_frame.stop()
+        finally:
+            if gaze_saver_thread:
+                gaze_queue_saver.put(None)
+                gaze_saver_thread.join()
+            if time_file:
+                time_file.close()
+            if args.record_gaze:
+                client_gaze.device.send_event("neon_vr_recorder.end")
+                client_gaze.device.recording_stop_and_save()
+            if container:
+                # for packet in stream.encode():
+                #    container.mux(packet)
+
+                container.close()
+            client_gaze.stop()
+            client_frame.stop()
         return
     
     def test_neon():
