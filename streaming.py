@@ -25,6 +25,14 @@ def recv_exact(sock, n):
         received += chunk
     return bytes(buf)
 
+def try_close_socket(socket):
+    if socket is not None:
+        try:
+            socket.close()
+        except Exception:
+            pass
+    return
+
 class StreamClient(abc.ABC):
 
     def __init__(self, events):
@@ -95,10 +103,10 @@ class NeonClient(StreamClient):
         return
         
     def stop(self):
-        super().stop()
+        self.alive = False
         if self.device is not None:
             self.device.close()
-        return
+        super().stop()
         
 class ScrcpyClient(StreamClient):
     def __init__(
@@ -272,20 +280,107 @@ class ScrcpyClient(StreamClient):
                     self.stop()
                     raise e
         return
+
+    def stop(self) -> None:
+        self.alive = False
+        try_close_socket(self._server_stream)
+        try_close_socket(self.control_socket)
+        try_close_socket(self._video_socket)
+        super().stop()
+        return
+
+class ScreenCapture(StreamClient):
+    def __init__(self, ip: str, video_port: int = 8080, sync_port: int = 8081):
+        super().__init__(const.ScrcpyEvents)
+        self.ip = ip
+        self.video_port = video_port
+        self.sync_port = sync_port
+        self.sock = None
+        self.resolution = None # Added to store resolution upon first decode
+
+    def _estimate_time_offset(self, number_of_measurements: int = 100) -> float:
+        sync_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sync_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sync_sock.settimeout(1.0)
         
-    def try_close_socket(self, socket):
-        if socket is not None:
-            try:
-                socket.close()
-            except Exception:
-                pass
+        try:
+            sync_sock.connect((self.ip, self.sync_port))
+            diff_total = 0
+            start_time_ns = time.time_ns()
+
+            for _ in range(number_of_measurements):
+                sync_sock.sendall(b'\x01')
+                data = recv_exact(sync_sock, 8)
+                if not data:
+                    break
+                (server_time_ms,) = struct.unpack(">q", data)
+
+                t2_ms = time.time_ns() / 1000000.0
+                diff_total += (t2_ms - server_time_ms)
+                time.sleep(0.002)
+
+            total_elapsed_ms = (time.time_ns() - start_time_ns) / 1000000.0
+            roundtrip_avg_ms = total_elapsed_ms / number_of_measurements
+            return (diff_total / number_of_measurements) - (roundtrip_avg_ms / 2)
+        finally:
+            try_close_socket(sync_sock)
         return
 
     def stop(self) -> None:
+        self.alive = False
+        try_close_socket(self.sock)
         super().stop()
-        self.try_close_socket(self._server_stream)
-        self.try_close_socket(self.control_socket)
-        self.try_close_socket(self._video_socket)
+
+    def _stream_loop(self) -> None:
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.connect((self.ip, self.video_port))
+
+        self._send_to_listeners(const.ScrcpyEvents.INIT)
+
+        self.offset = self._estimate_time_offset() #TODO
+        print("OFFSET", self.offset)
+
+        codec = CodecContext.create("h264", "r")
+        pts_ts = 0
+        config_received = False
+
+        while self.alive:
+            try:
+                pts = 0
+                data_packet_length = 65535
+                video_header = self.sock.recv(12)
+                if len(video_header) != 12:
+                    raise ConnectionError("Video header is less than 12 bytes")
+
+                (pts, data_packet_length) = struct.unpack(">ql", video_header)
+                pts = pts & const.ScrcpyMasks.PACKET_PTS_MASK
+                #print(pts)
+                raw_h264 = recv_exact(self.sock, data_packet_length)
+
+                if len(raw_h264) != data_packet_length:
+                    print(len(raw_h264), data_packet_length)
+
+                nal_type = raw_h264[4] & 0x1F
+                if nal_type == 7:
+                    config_received = True
+                if config_received is False:
+                    continue
+
+                packets = codec.parse(raw_h264)
+                for packet in packets:
+                    self._send_to_listeners(const.ScrcpyEvents.PACKET, packet, codec, pts_ts)
+                    pts_ts += 1
+                    frames = codec.decode(packet)
+                    for frame in frames:
+                        frame = frame.to_ndarray(format="bgr24")
+                        self.resolution = (frame.shape[1], frame.shape[0])
+                        self._send_to_listeners(const.ScrcpyEvents.FRAME, frame, pts * 0.001)
+            except (ConnectionError, OSError) as e: # Socket Closed
+                if self.alive:
+                    self._send_to_listeners(const.ScrcpyEvents.DISCONNECT)
+                    self.stop()
+                    raise e
         return
 
 if __name__ == "__main__":
@@ -303,6 +398,37 @@ if __name__ == "__main__":
         client.stop()
         return
         
+    def test_screencapture(ip):
+        import cv2
+        import av
+        import fractions
+
+        client = ScreenCapture(ip)
+
+        def on_frame(frame, pts):
+            cv2.imshow("frame", frame)
+            cv2.waitKey(1)
+            return
+
+        container = av.open("out.mp4", mode='w')
+        stream = container.add_stream('h264')
+        def on_packet(packet, codec, pts):
+            packet.time_base = fractions.Fraction(1, 20)
+            packet.pts = packet.dts = pts
+            stream.width = codec.width
+            stream.height = codec.height
+            stream.pix_fmt = 'yuv420p'
+            container.mux(packet)
+            return
+
+        client.add_listener(const.ScrcpyEvents.FRAME, on_frame)
+        client.add_listener(const.ScrcpyEvents.PACKET, on_packet)
+
+        client.start()
+        time.sleep(10)
+        client.stop()
+        return
+
     def test_scrcpy():
         from adbutils import adb
         import cv2
@@ -319,7 +445,7 @@ if __name__ == "__main__":
         stream = container.add_stream('h264')
         def on_packet(packet, codec, pts):
             packet.time_base = fractions.Fraction(1, 20)
-            packet.pts = pts
+            packet.pts = packet.dts = pts
             stream.width = codec.width
             stream.height = codec.height
             stream.pix_fmt = 'yuv420p'
@@ -334,4 +460,4 @@ if __name__ == "__main__":
         client.stop()
         return
     
-    test_scrcpy()
+    test_screencapture("192.168.1.125")

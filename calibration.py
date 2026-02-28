@@ -24,7 +24,7 @@ class Calibrator:
                 break
 
         if frame is not None:
-            img_l, img_r = np.hsplit(frame, 2)
+            img_l = img_r = frame
             left_img = cv2.cvtColor(img_l, cv2.COLOR_BGR2GRAY)
             right_img = cv2.cvtColor(img_r, cv2.COLOR_BGR2GRAY)
             if self.img_size is None:
@@ -72,13 +72,12 @@ class Calibrator:
         return
 
 if __name__ == "__main__":
-    from streaming import ScrcpyClient
+    from streaming import ScreenCapture
     import const
     from adbutils import adb
 
     def main():
-        device = adb.device_list()[0]
-        client = ScrcpyClient(device=device, max_width=2160,bitrate=1600000, max_fps=5, send_frame_meta=True)
+        client = ScreenCapture("192.168.1.125")
         calib = Calibrator()
 
         def on_frame(frame, pts):
@@ -93,7 +92,7 @@ if __name__ == "__main__":
                 frame = calib.process_frame()
                 if frame is not None:
                     cv2.imshow("frame", frame)
-                cv2.waitKey(1)
+                cv2.waitKey(500)
         except KeyboardInterrupt:
             pass
         finally:
