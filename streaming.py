@@ -190,7 +190,7 @@ class ScrcpyClient(StreamClient):
             "app_process",
             "/",
             "com.genymobile.scrcpy.Server",
-            "3.3.1", #Scrcpy server version
+            "4.0", #Scrcpy server version
             "log_level=info",
             f"max_size={self.max_width}",
             f"max_fps={self.max_fps}",
@@ -250,6 +250,9 @@ class ScrcpyClient(StreamClient):
                         raise ConnectionError("Video header is less than 12 bytes")
                     
                     (pts, data_packet_length) = struct.unpack(">QL", video_header)
+                    msb = pts >> 63
+                    if msb > 0:
+                        continue
                     pts = pts & const.ScrcpyMasks.PACKET_PTS_MASK
                     #print(pts)
                 raw_h264 = recv_exact(self._video_socket, data_packet_length)
