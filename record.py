@@ -97,7 +97,7 @@ if __name__ == "__main__":
     cv2.imshow("cv/av bug", np.zeros(1))
     cv2.destroyAllWindows()
 
-    from streaming import NeonClient, ScrcpyClient
+    from streaming import NeonClient, ScrcpyClient, MinScrcpyClient
     import const
     import time
     from adbutils import adb
@@ -127,7 +127,8 @@ if __name__ == "__main__":
         if args.split_fix is True:
             region = None
             max_width = max_width << 1
-        client_frame = ScrcpyClient(device=device, max_width=max_width, bitrate=1600000, max_fps=20, send_frame_meta=True, crop=region)
+        max_height = round(max_width * (46 / 43)) #TODO just keeping aspect
+        client_frame = MinScrcpyClient(device=device, width=max_width, height=max_height)
         
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))

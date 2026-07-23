@@ -25,6 +25,13 @@ def recv_exact(sock, n):
         received += chunk
     return bytes(buf)
 
+def try_close_socket(sock):
+    if sock is not None:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
 class StreamClient(abc.ABC):
 
     def __init__(self, events):
@@ -275,30 +282,190 @@ class ScrcpyClient(StreamClient):
                     self.stop()
                     raise e
         return
-        
-    def try_close_socket(self, socket):
-        if socket is not None:
+
+    def stop(self) -> None:
+        super().stop()
+        try_close_socket(self._server_stream)
+        try_close_socket(self.control_socket)
+        try_close_socket(self._video_socket)
+        return
+
+class MinScrcpyClient(StreamClient):
+    def __init__(
+        self,
+        device: AdbDevice,
+        width: int = 1032,
+        height: int = 1104,
+        crop: str = "0.0:0.0:0.5:1.0",
+        hqbitrate: int = 15000000,
+        lqbitrate: int = 5000000,
+        port: int = 27183,
+        connection_timeout: int = 5000
+    ):
+        super().__init__(const.ScrcpyEvents)
+
+        self.device = device
+        self.width = width
+        self.height = height
+        self.crop = crop
+        self.lqbitrate = lqbitrate
+        self.hqbitrate = hqbitrate
+        self.port = port
+        self.time_port = port + 1
+        self.connection_timeout = connection_timeout
+
+        self.resolution = (width, height)
+        self._server_stream = None
+        self._video_socket = None
+        self._adb_drain_thread = None
+        return
+
+    def _deploy_server(self) -> None:
+        jar_path = "3rdparty/minscrcpy/stream.jar"
+        jar_name = os.path.basename(jar_path)
+        jar_abs_path = os.path.join(
+            os.path.abspath(os.path.dirname(__file__)), jar_path
+        )
+        jar_device_path = f"/data/local/tmp/{jar_name}"
+
+        if not os.path.exists(jar_abs_path):
+            raise FileNotFoundError(f"Server JAR missing: {jar_abs_path}")
+
+        # Push JAR and wake device
+        self.device.sync.push(jar_abs_path, jar_device_path)
+        self.device.shell("input keyevent KEYCODE_WAKEUP")
+        time.sleep(5)
+
+        # Port forwarding
+        self.device.forward(f"tcp:{self.port}", f"tcp:{self.port}")
+        self.device.forward(f"tcp:{self.time_port}", f"tcp:{self.time_port}")
+
+        # Run QuestScrcpyMini server process
+        cmd = (
+            f"CLASSPATH={jar_device_path} app_process / "
+            f"com.example.QuestScrcpyMini --width {self.width} --height {self.height} "
+            f"--crop {self.crop} --port {self.port} --lqbitrate {self.lqbitrate} --hqbitrate {self.hqbitrate}"
+        )
+        self._server_stream = self.device.shell(cmd, stream=True)
+
+        # Drain ADB stdout buffer in background to prevent device deadlock
+        def _drain_adb():
             try:
-                socket.close()
+                while self.alive and self._server_stream:
+                    if not self._server_stream.read(1024):
+                        break
             except Exception:
                 pass
+            return
+
+        self._adb_drain_thread = threading.Thread(target=_drain_adb, daemon=True)
+        self._adb_drain_thread.start()
+        return
+
+    def _init_server_connection(self) -> None:
+        for _ in range(self.connection_timeout // 100):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect(("127.0.0.1", self.port))
+                self._video_socket = sock
+                return
+            except (ConnectionError, OSError):
+                time.sleep(0.1)
+        raise ConnectionError(
+            f"Failed to connect to MinScrcpy server at 127.0.0.1:{self.port} after {self.connection_timeout} ms"
+        )
+        return
+
+    def _estimate_time_offset(self, number_of_measurements: int = 100) -> float:
+        for _ in range(self.connection_timeout // 100):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect(("127.0.0.1", self.time_port))
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+                    diff_total = 0
+                    start = time.time_ns()
+
+                    for _ in range(number_of_measurements):
+                        s.sendall(b"\x01")
+                        data = recv_exact(s, 8)
+                        (t1,) = struct.unpack(">q", data)  # Server time in ms
+                        t2 = time.time_ns()                # PC time in ns
+
+                        diff_total += (t2 / 1000000.0) - t1
+
+                    roundtrip_avg = (time.time_ns() - start) / 1000000.0 / number_of_measurements
+                    return (diff_total / number_of_measurements) - (roundtrip_avg / 2.0)
+
+            except (ConnectionError, OSError):
+                time.sleep(0.1)
+
+        print("[MinScrcpyClient] Warning: Could not sync time offset. Defaulting to 0.0 ms.")
+        return 0.0
+
+    def _stream_loop(self) -> None:
+        try:
+            self._deploy_server()
+            time.sleep(0.5)
+
+            self.offset = self._estimate_time_offset()
+            print("OFFSET", self.offset)
+
+            self._init_server_connection()
+            self._send_to_listeners(const.ScrcpyEvents.INIT)
+
+            codec = CodecContext.create("h264", "r")
+            pts_ts = 0
+
+            while self.alive:
+                video_header = recv_exact(self._video_socket, 12)
+                pts_and_flags, data_packet_length = struct.unpack(">qi", video_header)
+
+                pts = pts_and_flags & const.ScrcpyMasks.PACKET_PTS_MASK
+                raw_h264 = recv_exact(self._video_socket, data_packet_length)
+
+                packets = codec.parse(raw_h264)
+                for packet in packets:
+                    self._send_to_listeners(
+                        const.ScrcpyEvents.PACKET, packet, codec, pts_ts
+                    )
+                    pts_ts += 1
+
+                    frames = codec.decode(packet)
+                    for frame in frames:
+                        frame_arr = frame.to_ndarray(format="bgr24")
+                        self.resolution = (frame_arr.shape[1], frame_arr.shape[0])
+                        self._send_to_listeners(const.ScrcpyEvents.FRAME, frame_arr, pts * 0.001)
+
+        except (ConnectionError, OSError) as e:
+            if self.alive:
+                self._send_to_listeners(const.ScrcpyEvents.DISCONNECT)
+                self.stop()
+                raise e
         return
 
     def stop(self) -> None:
         super().stop()
-        self.try_close_socket(self._server_stream)
-        self.try_close_socket(self.control_socket)
-        self.try_close_socket(self._video_socket)
+        try_close_socket(self._video_socket)
+        try_close_socket(self._server_stream)
+        self._video_socket = None
+        self._server_stream = None
+
+        try:
+            self.device.forward_remove(f"tcp:{self.port}")
+            self.device.forward_remove(f"tcp:{self.time_port}")
+        except Exception:
+            pass
         return
 
 if __name__ == "__main__":
     def test_neon():
         client = NeonClient("192.168.1.27", 8080)
-        
+
         def on_gaze_data(data):
             print(data.timestamp_unix_seconds)
             return
-        
+
         client.add_listener(const.PlEvents.GAZE_DATA, on_gaze_data)
         
         client.start()
@@ -336,5 +503,21 @@ if __name__ == "__main__":
         time.sleep(10)
         client.stop()
         return
+
+    def test_minscrcpy():
+        from adbutils import adb
+        import cv2
+        import av
+        client = MinScrcpyClient(device=adb.device_list()[0])
+
+        def on_frame(frame, pts):
+            cv2.imshow("frame", frame)
+            cv2.waitKey(1)
+            return
+        client.add_listener(const.ScrcpyEvents.FRAME, on_frame)
+        client.start()
+        time.sleep(20)
+        client.stop()
+        return
     
-    test_scrcpy()
+    test_minscrcpy()
