@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     def main():
         device = adb.device_list()[0]
-        client = ScrcpyClient(device=device, max_width=2160,bitrate=1600000, max_fps=5, send_frame_meta=True)
+        client = ScrcpyClient(device=device, max_width=2064, bitrate=1600000, max_fps=5, send_frame_meta=True)
         calib = Calibrator()
 
         def on_frame(frame, pts):
