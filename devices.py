@@ -53,7 +53,27 @@ class Headset:
         dir_vec_h = np.append(dir_vec, 1)
         projected_point = self.P[side] @ dir_vec_h
         return (projected_point / projected_point[2]).astype(int)[:2]
-        
+
+    def create_calibration(self, affine_matrix, camera_matrix):
+        dt = np.dtype([
+            ("extrinsics_affine_matrix", "(4,4)d"),
+            ("camera_matrix", "(3,3)d")
+        ])
+        data = np.zeros(1, dtype=dt)
+        data["extrinsics_affine_matrix"][0] = affine_matrix
+        data["camera_matrix"][0] = camera_matrix
+        return data
+
+    def save_calibration(self, path, side):
+        x_offset = np.linalg.norm(self.calib["T"]) * 0.5
+        if side == 1:
+            x_offset = -x_offset
+        affine_matrix = np.array(self.calib["neonToHeadsetAffine"])
+        affine_matrix[0, 3] += x_offset
+        camera_matrix = self.P[side][:3, :3]
+        data = self.create_calibration(affine_matrix, camera_matrix)
+        data.tofile(path)
+
 class Neon:
     def __init__(self, ip, port, config_path="data/neon.json"):
         self.ip = ip
@@ -93,8 +113,9 @@ class Neon:
             with open(path, "wb") as f_dest:
                 f_dest.write(f_source.read())
         return
-    
-    def read_intrinsics(self, path):
+
+    @staticmethod
+    def read_intrinsics(path):
         return np.fromfile(
             path,
             np.dtype(
@@ -116,8 +137,9 @@ class Neon:
         )
         
 if __name__ == "__main__":
-    headset = Headset(0.5)
-    print(headset.wrap(np.array((0, 0, 1)), 0))
-    neon = Neon("192.168.1.27", 8080)
-    from types import SimpleNamespace
-    print(neon.get_gaze_dir(SimpleNamespace(x=400,y=400)))
+    headset = Headset(1)
+    headset.save_calibration("gaze_remap_calibration.bin", 0)
+    #print(headset.wrap(np.array((0, 0, 1)), 0))
+    #neon = Neon("192.168.1.27", 8080)
+    #from types import SimpleNamespace
+    #print(neon.get_gaze_dir(SimpleNamespace(x=400,y=400)))

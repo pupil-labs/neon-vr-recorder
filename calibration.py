@@ -55,8 +55,8 @@ class Calibrator:
 
         self.cal_res["leftCameraMatrix"] = lcm.tolist()
         self.cal_res["rightCameraMatrix"] = rcm.tolist()
-        self.cal_res["leftDistCoeffs"] = ldc.tolist()
-        self.cal_res["rightDistCoeffs"] = rdc.tolist()
+        self.cal_res["leftDistCoeffs"] = ldc.ravel().tolist()
+        self.cal_res["rightDistCoeffs"] = rdc.ravel().tolist()
         self.cal_res["R"] = rm.tolist()
         self.cal_res["T"] = t.ravel().tolist()
         self.cal_res["R1"] = R1.tolist()

@@ -106,6 +106,7 @@ if __name__ == "__main__":
         from devices import Neon, Headset
         import argparse
         import sys
+        import json
 
         side = 0
         scale = 1
@@ -117,6 +118,7 @@ if __name__ == "__main__":
         parser.add_argument('-s', '--split-fix', help='Replace scrcpy cropping with NumPy horizontal split', action='store_true')
         args = parser.parse_args()
 
+        info = {}
         headset = Headset(scale)
         matcher = MatchingConsumer()
         client_gaze = NeonClient(args.ip, args.port)
@@ -141,10 +143,10 @@ if __name__ == "__main__":
             matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
             return
         client_frame.add_listener(const.ScrcpyEvents.FRAME, on_frame)
-        
+
         client_gaze.start()
         client_frame.start()
-        
+
         try:
             while(True):
                 frame, gaze = matcher.next_match()
@@ -158,9 +160,13 @@ if __name__ == "__main__":
                 cv2.waitKey(10)
         except KeyboardInterrupt:
             pass
-        
+
         client_gaze.stop()
         client_frame.stop()
+
+        info["offset_start_ms"] = client_gaze.offset - client_frame.offset
+        with open("data/info.json", "w") as f:
+            json.dump(info, f)
         return
     
     def test_neon():
