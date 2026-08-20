@@ -15,7 +15,7 @@ class Calibrator:
         self.square_size = 0.1
         return
 
-    def process_frame(self, skip=True):
+    def process_frame(self, skip=True, swap_left_right=False):
         frame = None
 
         while len(self.frame_queue) > 0:
@@ -25,6 +25,8 @@ class Calibrator:
 
         if frame is not None:
             img_l, img_r = np.hsplit(frame, 2)
+            if swap_left_right:
+                img_l, img_r = img_r, img_l
             left_img = cv2.cvtColor(img_l, cv2.COLOR_BGR2GRAY)
             right_img = cv2.cvtColor(img_r, cv2.COLOR_BGR2GRAY)
             if self.img_size is None:
@@ -66,7 +68,8 @@ class Calibrator:
         self.cal_res["calibResolution"] = self.img_size[0] << 1, self.img_size[1]
         return
 
-    def export(self, path):
+    def export(self, path, extra_fields={}):
+        self.cal_res.update(extra_fields)
         with open(path, "w") as f:
             json.dump(self.cal_res, f, indent=4)
         return
@@ -77,6 +80,8 @@ if __name__ == "__main__":
     from adbutils import adb
 
     def main():
+        inverted_stereo = True
+
         device = adb.device_list()[0]
         client = ScrcpyClient(device=device, max_width=2064, bitrate=1600000, max_fps=5, send_frame_meta=True)
         calib = Calibrator()
@@ -90,7 +95,7 @@ if __name__ == "__main__":
 
         try:
             while(True):
-                frame = calib.process_frame()
+                frame = calib.process_frame(swap_left_right=inverted_stereo)
                 if frame is not None:
                     cv2.imshow("frame", frame)
                 cv2.waitKey(1)
@@ -102,7 +107,7 @@ if __name__ == "__main__":
 
         print(f"Starting calibration based on {len(calib.left_pts)} samples")
         calib.calibrate()
-        calib.export("out.json")
+        calib.export("out.json", extra_fields={"invertedStereo":inverted_stereo})
 
         return
 

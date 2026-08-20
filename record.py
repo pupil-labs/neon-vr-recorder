@@ -124,13 +124,13 @@ if __name__ == "__main__":
         client_gaze = NeonClient(args.ip, args.port)
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
-        region = f"{headset.img_size[0]}:{headset.img_size[1]}:{headset.img_size[0] * side}:0"
+        side_region = side if headset.inverted_stereo is False else (1 - side)
+        region = ("0.0:0.0:0.5:1.0", "0.5:0.0:1.0:1.0")[side_region]
         max_width=headset.target_img_size[0]
         if args.split_fix is True:
-            region = None
+            region = "0.0:0.0:1.0:1.0"
             max_width = max_width << 1
-        max_height = round(max_width * (46 / 43)) #TODO just keeping aspect
-        client_frame = MinScrcpyClient(device=device, width=max_width, height=max_height)
+        client_frame = MinScrcpyClient(device=device, width=max_width, height=headset.target_img_size[1], crop=region)
         
         def on_gaze_data(data):
             matcher.gaze_queue.append((data.timestamp_unix_seconds + client_gaze.offset * 0.001, data))
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
         def on_frame(frame, pts):
             if args.split_fix is True:
-                frame = np.hsplit(frame, 2)[side]
+                frame = np.hsplit(frame, 2)[side_region]
             matcher.frame_queue.append((pts + client_frame.offset * 0.001, frame))
             return
         client_frame.add_listener(const.ScrcpyEvents.FRAME, on_frame)

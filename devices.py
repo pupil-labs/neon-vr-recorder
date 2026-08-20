@@ -20,6 +20,7 @@ class Headset:
         
         res = self.calib["resolution"]
         self.img_size = (res[0] // 2, res[1])
+        self.inverted_stereo = self.calib["invertedStereo"]
         cres = self.calib["calibResolution"]
         self.target_img_size = (int(cres[0] * scale * 0.5), int(cres[1] * scale))
         scaling_mat = np.array([
