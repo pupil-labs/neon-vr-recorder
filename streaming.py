@@ -268,8 +268,10 @@ class ScrcpyClient(StreamClient):
                     for frame in frames:
                         frame = frame.to_ndarray(format="bgr24")
                         self.resolution = (frame.shape[1], frame.shape[0])
-                        self._send_to_listeners(const.ScrcpyEvents.FRAME, frame, pts * 0.001)
-            except (ConnectionError, OSError) as e: # Socket Closed
+                        self._send_to_listeners(
+                            const.ScrcpyEvents.FRAME, frame, pts * 0.001, pts - 1
+                        )
+            except (ConnectionError, OSError) as e:  # Socket Closed
                 if self.alive:
                     self._send_to_listeners(const.ScrcpyEvents.DISCONNECT)
                     self.stop()
