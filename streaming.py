@@ -79,11 +79,12 @@ class StreamClient(abc.ABC):
         return
 
 class NeonClient(StreamClient):
-    def __init__(self, ip=None, port=None, device=None):
+    def __init__(self, ip=None, port=None, device=None, record=False):
         super().__init__(const.PlEvents)
         self.ip = ip
         self.port = port
         self.device = device
+        self.record = record
         return
         
     def _stream_loop(self):
@@ -95,18 +96,27 @@ class NeonClient(StreamClient):
             if self.device is None:
                 raise ConnectionError("No device found.")
         self.offset = self.device.estimate_time_offset().time_offset_ms.mean
-        print("OFFSET", self.offset)
+        print("Offset:", self.offset)
+
+        if self.record:
+            recording_id = self.device.recording_start()
+            print(f"Recording started on companion device, ID: {recording_id}")
+
         while self.alive:
             data = self.device.receive_gaze_datum()
             self._send_to_listeners(const.PlEvents.GAZE_DATA, data)
+
+        if self.record:
+            self.device.recording_stop_and_save()
+            print("Recording successfully saved on companion device.")
         return
-        
+
     def stop(self):
         super().stop()
         if self.device is not None:
             self.device.close()
         return
-        
+
 class ScrcpyClient(StreamClient):
     def __init__(
         self,
@@ -242,7 +252,7 @@ class ScrcpyClient(StreamClient):
         self._send_to_listeners(const.ScrcpyEvents.INIT)
         
         self.offset = self._estimate_time_offset() #TODO
-        print("OFFSET", self.offset)
+        print("Offset:", self.offset)
         
         codec = CodecContext.create("h264", "r")
         pts_ts = 0
@@ -409,7 +419,7 @@ class MinScrcpyClient(StreamClient):
             time.sleep(0.5)
 
             self.offset = self._estimate_time_offset()
-            print("OFFSET", self.offset)
+            print("Offset:", self.offset)
 
             self._init_server_connection()
             self._send_to_listeners(const.ScrcpyEvents.INIT)

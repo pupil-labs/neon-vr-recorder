@@ -4,6 +4,9 @@ import os
 import struct
 import sys
 import av
+import cv2
+import numpy as np
+from devices import Headset
 
 # Protocol Flags from Java Code
 PACKET_FLAG_CONFIG = 1 << 63
@@ -38,13 +41,9 @@ def parse_custom_stream(file_path):
 
 
 def convert_to_mp4_and_export_timestamps(
-    input_file, output_file, fps=60, constant_fps=False, start_time_ns=None, offset_ms=0
+    input_file, output_file, output_file_time, fps=60, constant_fps=False, start_time_ns=None, offset_ms=0
 ):
     """Remuxes H.264 video to MP4 and exports frame timestamps to a .time binary file in nanoseconds (uint64)."""
-    # Derive .time output path (e.g., "video.mp4" -> "video.time")
-    base_path, _ = os.path.splitext(output_file)
-    time_file_path = f"{base_path}.time"
-
     # Open MP4 container
     output = av.open(output_file, mode="w")
     stream = output.add_stream("h264", rate=fps)
@@ -59,9 +58,9 @@ def convert_to_mp4_and_export_timestamps(
     ts_count = 0
 
     print(f"Processing '{input_file}' -> '{output_file}'...")
-    print(f"Exporting timestamps to '{time_file_path}'...")
+    print(f"Exporting timestamps to '{output_file_time}'...")
 
-    with open(time_file_path, "wb") as time_file:
+    with open(output_file_time, "wb") as time_file:
         for pts_ms, is_config, is_keyframe, payload in parse_custom_stream(
             input_file
         ):
@@ -108,7 +107,7 @@ def convert_to_mp4_and_export_timestamps(
                 else:
                     # Store raw Quest timestamp in nanoseconds
                     frame_ts_ns = pts_ms * 1_000_000
-                frame_ts_ns += offset_ms * 1_000_000
+                frame_ts_ns -= offset_ms * 1_000_000
 
                 # Write as Unsigned 64-bit Integer (little-endian: <Q)
                 time_file.write(struct.pack("<Q", int(frame_ts_ns)))
@@ -141,7 +140,7 @@ def convert_to_mp4_and_export_timestamps(
                     frame_ts_ns = start_time_ns + (calculated_pts * 1_000_000)
                 else:
                     frame_ts_ns = (first_pts + calculated_pts) * 1_000_000
-                frame_ts_ns += offset_ms * 1_000_000
+                frame_ts_ns -= offset_ms * 1_000_000
                 time_file.write(struct.pack("<Q", int(frame_ts_ns)))
                 ts_count += 1
 
@@ -151,6 +150,88 @@ def convert_to_mp4_and_export_timestamps(
     )
     print(f"Saved {ts_count} frame timestamps to '{time_file_path}'.")
 
+
+class VideoRemapper:
+
+    def __init__(self):
+        self.headset = Headset(1)
+        self.side = 0 #left eye perspective
+        return
+
+    def custom_frame_logic(self, frame: np.ndarray, frame_idx: int) -> np.ndarray:
+        return self.headset.unwrap(frame, self.side)
+
+    def process(self, input_path: str, output_path: str):
+        """Reads the input video, applies custom_frame_logic, and writes the output MP4."""
+        if not os.path.exists(input_path):
+            print(
+                f"Error: Input file '{input_path}' not found.", file=sys.stderr
+            )
+            return
+
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            print(
+                f"Error: OpenCV could not open video file '{input_path}'.",
+                file=sys.stderr,
+            )
+            return
+
+        # Read stream attributes
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if fps <= 0:
+            fps = 60.0
+
+        print(f"Processing '{input_path}' -> '{output_path}'")
+        print(
+            f"Resolution: {width}x{height} | FPS: {fps:.2f} | Total Frames: {total_frames}"
+        )
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+        if not out.isOpened():
+            print(
+                f"Error: Could not initialize VideoWriter for '{output_path}'.",
+                file=sys.stderr,
+            )
+            cap.release()
+            return
+
+        frame_idx = 0
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Execute your custom processing method
+                processed_frame = self.custom_frame_logic(frame, frame_idx)
+
+                # Safety check: enforce exact frame dimensions for VideoWriter
+                p_height, p_width = processed_frame.shape[:2]
+                if (p_width, p_height) != (width, height):
+                    processed_frame = cv2.resize(
+                        processed_frame, (width, height)
+                    )
+
+                out.write(processed_frame)
+                frame_idx += 1
+
+                if frame_idx % 100 == 0 or frame_idx == total_frames:
+                    print(
+                        f"Processed {frame_idx}/{total_frames} frames ({(frame_idx / total_frames) * 100:.1f}%)"
+                    )
+
+        finally:
+            cap.release()
+            out.release()
+
+        print(f"Success! Saved processed video to '{output_path}'.")
 
 if __name__ == "__main__":
     import json
@@ -199,11 +280,19 @@ if __name__ == "__main__":
         print(f"Error: Input file '{args.input}' not found.", file=sys.stderr)
         sys.exit(1)
 
+    intermediate_mp4 = os.path.join(os.path.dirname(args.output), "distorted.mp4")
+    base_path, _ = os.path.splitext(args.output)
+    time_file_path = f"{base_path}.time"
+
     convert_to_mp4_and_export_timestamps(
         dinput,
-        args.output,
+        intermediate_mp4,
+        time_file_path,
         fps=args.fps,
         constant_fps=args.cfr,
         start_time_ns=args.start_time * 1_000_000 if args.start_time is not None else None,
         offset_ms = info["offset_start_ms"]
     )
+
+    processor = VideoRemapper()
+    processor.process(intermediate_mp4, args.output)

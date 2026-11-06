@@ -116,12 +116,13 @@ if __name__ == "__main__":
         parser.add_argument('-p', '--port', help='Neon port', type=int, default=8080)
         parser.add_argument('-d', '--di', help='Adb device index', type=int, default=0)
         parser.add_argument('-s', '--split-fix', help='Replace scrcpy cropping with NumPy horizontal split', action='store_true')
+        parser.add_argument('-r', '--record', help='Automatically start and stop recording on the Companion app', action='store_true')
         args = parser.parse_args()
 
         info = {}
         headset = Headset(scale)
         matcher = MatchingConsumer()
-        client_gaze = NeonClient(args.ip, args.port)
+        client_gaze = NeonClient(args.ip, args.port, record=args.record)
         neon = Neon(client_gaze.ip, client_gaze.port)
         device = adb.device_list()[args.di]
         side_region = side if headset.inverted_stereo is False else (1 - side)
@@ -164,7 +165,7 @@ if __name__ == "__main__":
         client_gaze.stop()
         client_frame.stop()
 
-        info["offset_start_ms"] = client_gaze.offset - client_frame.offset
+        info["offset_start_ms"] = client_gaze.offset - client_frame.offset #Gaze Time = Frame Time - (Gaze Offset - Frame Offset) -> Gaze Time = Frame Time - offset_start_ms
         with open("data/info.json", "w") as f:
             json.dump(info, f)
         return
